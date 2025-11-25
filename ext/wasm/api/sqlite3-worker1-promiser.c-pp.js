@@ -213,6 +213,7 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
     const proxy = Object.create(null);
     proxy.message = msg;
     let rowCallbackId /* message handler ID for exec on-row callback proxy */;
+    const xfer = [];
     if('exec'===msg.type && msg.args){
       if('function'===typeof msg.args.callback){
         rowCallbackId = msg.messageId+':row';
@@ -236,6 +237,10 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
            needed for the over-the-Worker interface).
         */
       }
+      if(msg.xfer){
+        xfer = msg.xfer;
+        delete msg.xfer;
+      }
     }
     //debug("requestWork", msg);
     let p = new Promise(function(resolve, reject){
@@ -243,7 +248,7 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
       proxy.reject = reject;
       handlerMap[msg.messageId] = proxy;
       debug("Posting",msg.type,"message to Worker dbId="+(dbId||'default')+':',msg);
-      config.worker.postMessage(msg);
+      config.worker.postMessage(msg, xfer);
     });
     if(rowCallbackId) p = p.finally(()=>delete handlerMap[rowCallbackId]);
     return p;

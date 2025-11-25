@@ -369,7 +369,7 @@
 */
 globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
 const util = sqlite3.util;
-sqlite3.initWorker1API = function(){
+sqlite3.initWorker1API = function(extMsgHandler){
   'use strict';
   const toss = (...args)=>{throw new Error(args.join(' '))};
   if(!(globalThis.WorkerGlobalScope instanceof Function)){
@@ -623,6 +623,8 @@ sqlite3.initWorker1API = function(){
       toss("Testing worker exception");
     }
   }/*wMsgHandler*/;
+
+  extMsgHandler({wMsgHandler, getMsgDb, wState});
 
   globalThis.onmessage = async function(ev){
     ev = ev.data;
