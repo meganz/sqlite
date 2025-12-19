@@ -137,6 +137,7 @@ sqlite3InitModule().then(sqlite3 => {
           const tableName = escapeId(table);
           const colSql = columns.map(c => escapeId(c)).join(',');
           const rowPlace = '(' + new Array(perRowBind).fill('?').join(',') + ')';
+          const max = 30000;
 
           let committed = false;
           let startedTxn = false;
@@ -146,19 +147,37 @@ sqlite3InitModule().then(sqlite3 => {
           startedTxn = true;
 
           const totalRows = Math.floor(binds.length / perRowBind);
-          const sql = `INSERT OR REPLACE INTO ${tableName} (${colSql}) VALUES ${rowPlace}`;
-          const stmt = db.prepare(sql);
+          const maxRowsPerStmt = Math.max(1, Math.floor(max / perRowBind));
 
-          for (let rowIdx = 0; rowIdx < totalRows; rowIdx++) {
+          let stmt;
+          let stmtRows = 0;
 
+          for (let rowIdx = 0; rowIdx < totalRows; rowIdx += maxRowsPerStmt) {
+
+            const rowsInStmt = Math.min(maxRowsPerStmt, totalRows - rowIdx);
             const start = rowIdx * perRowBind;
-            const end = start + perRowBind;
+            const end = start + rowsInStmt * perRowBind;
+
+            if (!stmt || stmtRows !== rowsInStmt) {
+
+              if (stmt) {
+                stmt.finalize();
+              }
+
+              const valuesSql = new Array(rowsInStmt).fill(rowPlace).join(',');
+              const sql = `INSERT OR REPLACE INTO ${tableName} (${colSql}) VALUES ${valuesSql}`;
+              stmt = db.prepare(sql);
+              stmtRows = rowsInStmt;
+            }
 
             stmt.bind(binds.slice(start, end));
             stmt.step();
             stmt.reset(true);
           }
-          stmt.finalize();
+
+          if (stmt) {
+            stmt.finalize();
+          }
 
           if (!skipTx && startedTxn) {
             db.exec('COMMIT');

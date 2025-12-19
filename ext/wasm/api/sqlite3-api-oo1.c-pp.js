@@ -561,6 +561,71 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
   };
 
   /**
+   * Builds and returns a columnar result set object from the given, for better efficiency on transferring
+   * large result sets between threads.
+   */
+  const buildColumnarResult = function(columnNames = [], columnArrays = [], xferTarget, columnTypes = []) {
+    const columns = [];
+    const pushBuffer = buf => (xferTarget && buf && xferTarget.push(buf), buf);
+    const pushNullBitmap = bitmap => (bitmap && xferTarget && xferTarget.push(bitmap.buffer), bitmap);
+
+    for (let i = 0; i < columnArrays.length; i++) {
+      const values = columnArrays[i] || [];
+      const len = values.length;
+      const declaredType = (columnTypes[i] || '').toLowerCase() || 'mixed';
+      let atype;
+      let isBlob = false;
+
+      switch (declaredType) {
+        case 'integer':
+          atype = Int32Array;
+          break;
+        case 'blob':
+          atype = Array;
+          isBlob = true;
+          break;
+        case 'real':
+          atype = Float64Array;
+          break;
+      }
+
+      if (atype) {
+        const data = new atype(len);
+        let nullBitmap;
+        for (let j = 0; j < len; j++) {
+          const v = values[j];
+          if (v === null || v === undefined) {
+            nullBitmap || (nullBitmap = new Uint8Array(len));
+            nullBitmap[j] = 1;
+            continue;
+          }
+          if (isBlob) {
+            data[j] = v.buffer;
+            pushBuffer(v.buffer);
+          }
+          else {
+            data[j] = v;
+          }
+        }
+        const col = {kind: declaredType, data};
+        if (nullBitmap) {
+          col.nullBitmap = pushNullBitmap(nullBitmap);
+        }
+        columns.push(col);
+
+        if (!isBlob) {
+          pushBuffer(data.buffer);
+        }
+      }
+      else {
+        columns.push({kind: declaredType, data: values.slice()});
+      }
+    }
+
+    return {columnNames, columns};
+  };
+
+  /**
      Expects to be passed the `arguments` object from DB.exec(). Does
      the argument processing/validation, throws on error, and returns
      a new object on success:
@@ -622,6 +687,41 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
       out.returnVal = ()=>opt.resultRows;
     }
     if(opt.callback || opt.resultRows){
+
+      // build columnar results if mode is 'column'
+      const columnFinalizer = (cache) => {
+        const names = cache.columnNames || opt.columnNames || [];
+        const arrays = cache.columnArrays || (names.length ? names.map(() => []) : []);
+        const types = cache.columnTypes || (opt.columnTypes || []);
+        const xfer = db._blobXfer instanceof Array ? db._blobXfer : undefined;
+        return buildColumnarResult(names, arrays, xfer, types);
+      };
+
+      const colModeCbArg = (stmt, cache) => {
+        if (!cache.columnNames) {
+          cache.columnNames = stmt.getColumnNames([]);
+        }
+        if (!cache.columnTypes && stmt.getColumnDecltypes) {
+          cache.columnTypes = stmt.getColumnDecltypes([]);
+        }
+        if (!cache.columnArrays) {
+          cache.columnArrays = cache.columnNames.map(() => []);
+        }
+        let rv = null;
+
+        if (out.autoMode) {
+          rv = Object.create(null);
+        }
+
+        const row = stmt.get([]);
+        for (let i = 0; i < row.length; i++) {
+          cache.columnArrays[i].push(row[i]);
+          if (rv) {
+            rv[cache.columnNames[i]] = row[i];
+          }
+        }
+        return rv;
+      }
       switch((undefined===opt.rowMode) ? 'array' : opt.rowMode) {
         case 'object':
           out.cbArg = (stmt,cache)=>{
@@ -642,6 +742,18 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
           };
           break;
         case 'array': out.cbArg = (stmt)=>stmt.get([]); break;
+        // Column and auto mode. auto is return objects or column depending size of data
+        case 'column':
+          out.columnMode = true;
+          out.cbArg = colModeCbArg;
+          out.columnFinalizer = columnFinalizer;
+          break;
+        case 'auto':
+          out.autoMode = true;
+          out.cbArg = colModeCbArg;
+          out.columnFinalizer = columnFinalizer;
+          out.autoThreshold = 5e4; // 50000 rows
+          break;
         case 'stmt':
           if(Array.isArray(opt.resultRows)){
             toss3("exec(): invalid rowMode for a resultRows array: must",
@@ -1032,8 +1144,12 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
       }
       const opt = arg.opt;
       const callback = opt.callback;
+      let columnMode = !!arg.columnMode;
+      const autoMode = !!arg.autoMode;
+      const autoThreshold = arg.autoThreshold;
       const resultRows =
             Array.isArray(opt.resultRows) ? opt.resultRows : undefined;
+      let cbArgCache;
       let stmt;
       let bind = opt.bind;
       let evalFirstResult = !!(
@@ -1096,7 +1212,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
                  and names. */) ? 0 : 1;
             evalFirstResult = false;
             if(arg.cbArg || resultRows){
-              const cbArgCache = Object.create(null)
+              cbArgCache || (cbArgCache = Object.create(null));
               /* 2nd arg for arg.cbArg, used by (at least) row-to-object
                  converter */;
               for( ; stmt.step(); __execLock.delete(stmt) ){
@@ -1105,6 +1221,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
                 }
                 __execLock.add(stmt);
                 const row = arg.cbArg(stmt,cbArgCache);
+                if(resultRows && !(columnMode || autoMode && resultRows.length > autoThreshold)) resultRows.push(row);
                 if(resultRows) resultRows.push(row);
                 if(callback && false === callback.call(opt, row, stmt)){
                   break;
@@ -1136,6 +1253,22 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
           stmt.finalize();
         }
       }
+
+      if (autoMode) {
+        columnMode = resultRows.length > autoThreshold;
+        if (columnMode) {
+          resultRows.length = 0;
+        }
+      }
+
+      if (columnMode && arg.columnFinalizer) {
+        const colRes = arg.columnFinalizer(cbArgCache || Object.create(null));
+        if (opt) {
+          opt.columnar = colRes;
+        }
+        return colRes;
+      }
+
       return arg.returnVal();
     }/*exec()*/,
 
@@ -2230,6 +2363,15 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     get: function(){return capi.sqlite3_column_count(this.pointer)},
     set: ()=>toss3("The columnCount property is read-only.")
   });
+
+  Stmt.prototype.getColumnDecltypes = function(tgt = []) {
+    affirmColIndex(affirmStmtOpen(this), 0);
+    const n = this.columnCount;
+    for (let i = 0; i < n; ++i) {
+      tgt.push(capi.sqlite3_column_decltype(this.pointer, i));
+    }
+    return tgt;
+  };
 
   Object.defineProperty(Stmt.prototype, 'parameterCount', {
     enumerable: false,
