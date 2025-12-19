@@ -2062,14 +2062,15 @@ static void DbHookCmd(
 **     -blob ("auto"|"text"|"sql"|...)         How to escape BLOB values
 **     -wordwrap ("auto"|"off"|"on")           Try to wrap at word boundry?
 **     -textjsonb ("auto"|"off"|"on")          Auto-convert JSONB to text?
-**     -textnull ("auto"|"off"|"on")           Use text encoding for -null.
 **     -splitcolumn ("auto"|"off"|"on")        Enable split-column mode
 **     -defaultalign ("auto"|"left"|...)       Default alignment
 **     -titalalign ("auto"|"left"|"right"|...) Default column name alignment
+**     -border ("auto"|"off"|"on")             Border for box and table styles
 **     -wrap NUMBER                            Max width of any single column
 **     -screenwidth NUMBER                     Width of the display TTY
 **     -linelimit NUMBER                       Max lines for any cell
 **     -charlimit NUMBER                       Content truncated to this size
+**     -titlelimit NUMBER                      Max width of column titles
 **     -align LIST-OF-ALIGNMENT                Alignment of columns
 **     -widths LIST-OF-NUMBERS                 Widths for individual columns
 **     -columnsep TEXT                         Column separator text
@@ -2089,14 +2090,15 @@ static void DbHookCmd(
 **     -blob             eBlob
 **     -wordwrap         bWordWrap
 **     -textjsonb        bTextJsonb
-**     -textnull         bTestNull
 **     -splitcolumn      bSplitColumn
 **     -defaultalign     eDfltAlign
 **     -titlealign       eTitleAlign
+**     -border           bBorder
 **     -wrap             nWrap
 **     -screenwidth      nScreenWidth
 **     -linelimit        nLineLimit
 **     -charlimit        nCharLimit
+**     -titlelimit       nTitleLimit
 **     -align            nAlign, aAlign
 **     -widths           nWidth, aWidth
 **     -columnsep        zColumnSep
@@ -2193,13 +2195,13 @@ static int dbQrf(SqliteDb *pDb, int objc, Tcl_Obj *const*objv){
       ** thrid element of the array when processing --text */
       static const char *azText[] = {           "off",   "on",
         "auto",             "csv",              "html",
-        "json",             "plain",            "sql",
-        "tcl",              0
+        "json",             "plain",            "relaxed",
+        "sql",              "tcl",              0
       };
       static unsigned char aTextMap[] = {
         QRF_TEXT_Auto,      QRF_TEXT_Csv,       QRF_TEXT_Html,
-        QRF_TEXT_Json,      QRF_TEXT_Plain,     QRF_TEXT_Sql,
-        QRF_TEXT_Tcl
+        QRF_TEXT_Json,      QRF_TEXT_Plain,     QRF_TEXT_Relaxed,
+        QRF_TEXT_Sql,       QRF_TEXT_Tcl
       };
       int txt;
       int k = zArg[2]=='e';
@@ -2241,17 +2243,17 @@ static int dbQrf(SqliteDb *pDb, int objc, Tcl_Obj *const*objv){
       qrf.bWordWrap = aBoolMap[v];
       i++;
     }else if( strcmp(zArg,"-textjsonb")==0
-           || strcmp(zArg,"-textnull")==0
            || strcmp(zArg,"-splitcolumn")==0
+           || strcmp(zArg,"-border")==0
     ){
       int v = 0;
       rc = Tcl_GetIndexFromObj(pDb->interp, objv[i+1], azBool,
                               zArg, 0, &v);
       if( rc ) goto format_failed;
-      if( zArg[5]=='j' ){
+      if( zArg[1]=='t' ){
         qrf.bTextJsonb = aBoolMap[v];
-      }else if( zArg[5]=='n' ){
-        qrf.bTextNull = aBoolMap[v];
+      }else if( zArg[1]=='b' ){
+        qrf.bBorder = aBoolMap[v];
       }else{
         qrf.bSplitColumn = aBoolMap[v];
       }
@@ -2272,6 +2274,7 @@ static int dbQrf(SqliteDb *pDb, int objc, Tcl_Obj *const*objv){
     }else if( strcmp(zArg,"-wrap")==0
            || strcmp(zArg,"-screenwidth")==0 
            || strcmp(zArg,"-linelimit")==0 
+           || strcmp(zArg,"-titlelimit")==0 
     ){
       int v = 0;
       rc = Tcl_GetIntFromObj(pDb->interp, objv[i+1], &v);
@@ -2285,6 +2288,8 @@ static int dbQrf(SqliteDb *pDb, int objc, Tcl_Obj *const*objv){
         qrf.nWrap = v;
       }else if( zArg[1]=='s' ){
         qrf.nScreenWidth = v;
+      }else if( zArg[1]=='t' ){
+        qrf.nTitleLimit = v;
       }else{
         qrf.nLineLimit = v;
       }
@@ -2360,6 +2365,10 @@ static int dbQrf(SqliteDb *pDb, int objc, Tcl_Obj *const*objv){
       i++;
     }else if( strcmp(zArg,"-null")==0 ){
       qrf.zNull = Tcl_GetString(objv[i+1]);
+      i++;
+    }else if( strcmp(zArg,"-version")==0 ){
+      /* Undocumented. Testing use only */
+      qrf.iVersion = atoi(Tcl_GetString(objv[i+1]));
       i++;
     }else{
       Tcl_AppendResult(pDb->interp, "unknown option: ", zArg, (char*)0);

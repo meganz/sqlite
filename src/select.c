@@ -1445,9 +1445,14 @@ static void selectInnerLoop(
         assert( nResultCol<=pDest->nSdst );
         pushOntoSorter(
             pParse, pSort, p, regResult, regOrig, nResultCol, nPrefixReg);
+        pDest->iSDParm = regResult;
       }else{
         assert( nResultCol==pDest->nSdst );
-        assert( regResult==iParm );
+        if( regResult!=iParm ){
+          /* This occurs in cases where the SELECT had both a DISTINCT and
+          ** an OFFSET clause.  */
+          sqlite3VdbeAddOp3(v, OP_Copy, regResult, iParm, nResultCol-1);
+        }
         /* The LIMIT clause will jump out of the loop for us */
       }
       break;
@@ -3612,10 +3617,8 @@ static int multiSelectOrderBy(
         if( pItem->u.x.iOrderByCol==i ) break;
       }
       if( j==nOrderBy ){
-        Expr *pNew = sqlite3Expr(db, TK_INTEGER, 0);
+        Expr *pNew = sqlite3ExprInt32(db, i);
         if( pNew==0 ) return SQLITE_NOMEM_BKPT;
-        pNew->flags |= EP_IntValue;
-        pNew->u.iValue = i;
         p->pOrderBy = pOrderBy = sqlite3ExprListAppend(pParse, pOrderBy, pNew);
         if( pOrderBy ) pOrderBy->a[nOrderBy++].u.x.iOrderByCol = (u16)i;
       }
@@ -7131,7 +7134,7 @@ static int havingToWhereExprCb(Walker *pWalker, Expr *pExpr){
      && pExpr->pAggInfo==0
     ){
       sqlite3 *db = pWalker->pParse->db;
-      Expr *pNew = sqlite3Expr(db, TK_INTEGER, "1");
+      Expr *pNew = sqlite3ExprInt32(db, 1);
       if( pNew ){
         Expr *pWhere = pS->pWhere;
         SWAP(Expr, *pNew, *pExpr);
@@ -7598,6 +7601,30 @@ static void selectCheckOnClauses(Parse *pParse, Select *pSelect){
   sCtx.pSrc = pSelect->pSrc;
   sqlite3WalkExprNN(&w, pSelect->pWhere);
   pSelect->selFlags &= ~SF_OnToWhere;
+}
+
+/*
+** If p2 exists and p1 and p2 have the same number of terms, then change
+** every term of p1 to have the same sort order as p2 and return true.
+**
+** If p2 is NULL or p1 and p2 are different lengths, then make no changes
+** and return false.
+**
+** p1 must be non-NULL.
+*/
+static int sqlite3CopySortOrder(ExprList *p1, ExprList *p2){
+  assert( p1 );
+  if( p2 && p1->nExpr==p2->nExpr ){
+    int ii;
+    for(ii=0; ii<p1->nExpr; ii++){
+      u8 sortFlags;
+      sortFlags = p2->a[ii].fg.sortFlags & KEYINFO_ORDER_DESC;
+      p1->a[ii].fg.sortFlags = sortFlags;
+    }
+    return 1;
+  }else{
+    return 0;
+  }
 }
 
 /*
@@ -8252,7 +8279,8 @@ int sqlite3Select(
   ** BY and DISTINCT, and an index or separate temp-table for the other.
   */
   if( (p->selFlags & (SF_Distinct|SF_Aggregate))==SF_Distinct
-   && sqlite3ExprListCompare(sSort.pOrderBy, pEList, -1)==0
+   && sqlite3CopySortOrder(pEList, sSort.pOrderBy)
+   && sqlite3ExprListCompare(pEList, sSort.pOrderBy, -1)==0
    && OptimizationEnabled(db, SQLITE_GroupByOrder)
 #ifndef SQLITE_OMIT_WINDOWFUNC
    && p->pWin==0
@@ -8466,21 +8494,10 @@ int sqlite3Select(
       ** but not actually sorted. Either way, record the fact that the
       ** ORDER BY and GROUP BY clauses are the same by setting the orderByGrp
       ** variable.  */
-      if( sSort.pOrderBy && pGroupBy->nExpr==sSort.pOrderBy->nExpr ){
-        int ii;
-        /* The GROUP BY processing doesn't care whether rows are delivered in
-        ** ASC or DESC order - only that each group is returned contiguously.
-        ** So set the ASC/DESC flags in the GROUP BY to match those in the
-        ** ORDER BY to maximize the chances of rows being delivered in an
-        ** order that makes the ORDER BY redundant.  */
-        for(ii=0; ii<pGroupBy->nExpr; ii++){
-          u8 sortFlags;
-          sortFlags = sSort.pOrderBy->a[ii].fg.sortFlags & KEYINFO_ORDER_DESC;
-          pGroupBy->a[ii].fg.sortFlags = sortFlags;
-        }
-        if( sqlite3ExprListCompare(pGroupBy, sSort.pOrderBy, -1)==0 ){
-          orderByGrp = 1;
-        }
+      if( sqlite3CopySortOrder(pGroupBy, sSort.pOrderBy)
+       && sqlite3ExprListCompare(pGroupBy, sSort.pOrderBy, -1)==0
+      ){
+        orderByGrp = 1;
       }
     }else{
       assert( 0==sqlite3LogEst(1) );
