@@ -1223,7 +1223,6 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
                 __execLock.add(stmt);
                 const row = arg.cbArg(stmt,cbArgCache);
                 if(resultRows && !(columnMode || autoMode && resultRows.length > autoThreshold)) resultRows.push(row);
-                if(resultRows) resultRows.push(row);
                 if(callback && false === callback.call(opt, row, stmt)){
                   break;
                 }
