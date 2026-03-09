@@ -86,6 +86,7 @@ emo.strip     = 💈
 emo.test      = 🧪
 emo.tool      = 🔨
 emo.wasm-opt  = 🧼
+emo.cleanup   = 🧼
 # 👷🪄🧮🧫🧽🍿⛽🚧🎱🪚🏆🧼
 
 #
@@ -205,7 +206,7 @@ b.mkdir@ = if [ ! -d $(dir $@) ]; then \
 # $1 = logtag, $2 = src file(s). $3 = dest dir
 b.cp = $(call b.mkdir@); \
   echo '$(logtag.$(1)) $(emo.disk) $(2) ==> $3'; \
-  cp -p $(2) $(3) || exit
+  cp -f -p $(2) $(3) || exit
 
 #
 # $(call b.c-pp.shcmd,LOGTAG,src,dest,-Dx=y...)
@@ -317,7 +318,7 @@ endif
 #
 sqlite3.canonical.c = $(dir.top)/sqlite3.c
 sqlite3.c ?= $(firstword $(wildcard $(dir.top)/sqlite3-see.c) $(sqlite3.canonical.c))
-sqlite3.h = $(dir $(sqlite3.c))/sqlite3.h
+sqlite3.h = $(dir $(sqlite3.c))sqlite3.h
 
 #
 # bin.version-info = binary to output various sqlite3 version info for
@@ -868,7 +869,7 @@ $(sqlite3-license-version.js): $(bin.version-info) \
   $(dir.api)/sqlite3-license-version-header.js $(MAKEFILE)
 	@$(call b.mkdir@); echo '$(logtag.@) $(emo.disk)'; { \
 		cat $(dir.api)/sqlite3-license-version-header.js || exit $$?;  \
-		echo '/*'; \
+		echo '/* @preserve'; \
 		echo '** This code was built from sqlite3 version...'; \
 		echo '**'; \
 		awk '/define SQLITE_VERSION/{$$1=""; print "**" $$0}' $(sqlite3.h); \
@@ -1220,7 +1221,7 @@ $(foreach B,$(b.names),$(eval post: $(post-js.$(B).js)))
 # These flags get applied via $(bin.mkwb).
 emcc.speedtest1.common = $(emcc_opt_full)
 emcc.speedtest1 = -I. -I$(dir $(sqlite3.canonical.c))
-emcc.speedtest1 += -sENVIRONMENT=web
+emcc.speedtest1 += -sENVIRONMENT=web,worker
 emcc.speedtest1 += -sALLOW_MEMORY_GROWTH
 emcc.speedtest1 += -sINITIAL_MEMORY=$(emcc.INITIAL_MEMORY.32)
 emcc.speedtest1.common += -sINVOKE_RUN=0
@@ -1527,9 +1528,9 @@ update-docs:
 	exit 127
 else
 wasm.docs.jswasm = $(wasm.docs.home)/jswasm
-update-docs: $(bin.stripccomments) $(out.sqlite3.js) $(out.sqlite3.wasm)
+update-docs: $(bin.stripccomments) $(out.vanilla.js) $(out.vanilla.wasm)
 	@echo "Copying files to the /wasm docs. Be sure to use an -Oz build for this!";
-	cp -p $(sqlite3.wasm) $(wasm.docs.jswasm)/.
+	cp -p $(out.vanilla.wasm) $(wasm.docs.jswasm)/.
 	$(bin.stripccomments) -k -k < $(out.vanilla.js) \
 		| sed -e '/^[ \t]*$$/d' > $(wasm.docs.jswasm)/sqlite3.js
 	cp -p demo-123.js demo-123.html demo-123-worker.html $(wasm.docs.home)/.
@@ -1591,6 +1592,39 @@ snapshot:
 endif
 # ^^^ making dist/snapshot
 CLEAN_FILES += $(wildcard sqlite-wasm-*.zip)
+
+########################################################################
+# The npm target is specifically for preparing files for the downstream
+# https://github.com/sqlite/sqlite-wasm (npm) distribution.
+#
+# Per agreement with that project's maintainers, these filenames need
+# to remain stable. To avoid breakage in their deployment process, any
+# changes (like renaming files) which potentially break their deployment
+# needs to be communicated to that project via opening a new ticket or
+# direct coordination with its maintainers.
+#
+# This target does a full clean/rebuild so that we can ensure that the
+# optimization level is set consistently across all files.
+#
+npm.bundle.zip = npm-bundle.zip
+CLEAN_FILES += $(npm.bundle.zip)
+# Distributables which need to be built for npm:
+npm_files = $(addprefix $(dir.dout)/, \
+sqlite3-bundler-friendly.mjs \
+sqlite3-opfs-async-proxy.js \
+sqlite3-worker1-bundler-friendly.mjs \
+sqlite3-worker1-promiser.mjs \
+sqlite3-worker1.mjs \
+sqlite3.mjs \
+sqlite3.wasm \
+sqlite3-node.mjs \
+)
+npm: $(sqlite3.canonical.c)
+	@echo "$(emo.cleanup) Forcing a clean rebuild to ensure consistent optimization flags."
+	$(MAKE) clean
+	$(MAKE) -e "emcc_opt=-Oz $(emcc-opt-extra)" $(npm_files)
+	rm -f $(npm.bundle.zip); zip -r $(npm.bundle.zip) $(npm_files)
+	unzip -l $(npm.bundle.zip)
 
 ########################################################################
 # Explanation of, and some commentary on, various emcc build flags

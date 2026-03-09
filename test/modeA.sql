@@ -14,7 +14,7 @@
 # Test cases for the ".mode" command of the CLI.
 # To run these tests:
 #
-#   ./sqlite3 <test/modeA.clitest
+#   ./sqlite3 test/modeA.sql
 #
 #
 .open :memory:
@@ -228,3 +228,76 @@ SELECT a AS 'abcd', b FROM t2 WHERE c=3;
 ...: The quick fox jumps over the lazy brown dog
   b: 2
 END
+
+# https://sqlite.org/forum/forumpost/2025-12-31T19:14:24z
+#
+# For legacy compatibility, ".header" settings are not changed
+# by ".mode" unless the --title or --reset option is used on .mode.
+#
+.testcase 600
+DROP TABLE IF EXISTS t1;
+CREATE TABLE t1(a,b,c);
+INSERT INTO t1 VALUES(1,2,3);
+.header on
+.mode csv
+SELECT * FROM t1;
+.check --glob a,b,c*
+
+.testcase 610
+.mode csv -reset
+SELECT * FROM t1;
+.check 1,2,3
+
+.testcase 620
+.mode tty
+.mode csv
+.header on
+SELECT * FROM t1;
+.check --glob a,b,c*
+
+.testcase 630
+.mode tty
+.mode csv --title on
+SELECT * FROM t1;
+.check --glob a,b,c*
+.testcase 631
+.mode tty
+.mode csv --title off
+SELECT * FROM t1;
+.check 1,2,3
+
+# Verification of claims about .insert mode in the climode.html
+# documentation.
+.testcase 700
+CREATE TABLE tbl1(one,two);
+INSERT INTO tbl1 VALUES('hello!',10),('goodbye',20);
+.mode insert new_table
+SELECT * FROM tbl1;
+.check <<END
+INSERT INTO new_table VALUES('hello!',10);
+INSERT INTO new_table VALUES('goodbye',20);
+END
+.testcase 710
+.mode insert new_table --titles on
+SELECT * FROM tbl1;
+.check <<END
+INSERT INTO new_table(one,two) VALUES('hello!',10);
+INSERT INTO new_table(one,two) VALUES('goodbye',20);
+END
+.testcase 720
+.mode insert new_table --titles off
+SELECT * FROM tbl1;
+.check <<END
+INSERT INTO new_table VALUES('hello!',10);
+INSERT INTO new_table VALUES('goodbye',20);
+END
+
+# QRF reports an error if the string is too big.
+#
+.testcase 800
+.mode box
+.limit length 1000
+WITH c(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM c WHERE n<100)
+SELECT hex(randomblob(100)) c;
+.check -glob "*: string or blob too big"
+.limit length 10000000

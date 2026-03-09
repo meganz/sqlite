@@ -215,11 +215,16 @@ void sqlite3BeginTrigger(
     }
   }
 
+  /* NB: The SQLITE_ALLOW_TRIGGERS_ON_SYSTEM_TABLES compile-time option is
+  ** experimental and unsupported. Do not use it unless understand the
+  ** implications and you cannot get by without this capability. */
+#if !defined(SQLITE_ALLOW_TRIGGERS_ON_SYSTEM_TABLES) /* Experimental */
   /* Do not create a trigger on a system table */
   if( sqlite3StrNICmp(pTab->zName, "sqlite_", 7)==0 ){
     sqlite3ErrorMsg(pParse, "cannot create trigger on system table");
     goto trigger_cleanup;
   }
+#endif
 
   /* INSTEAD of triggers are only for views and views only support INSTEAD
   ** of triggers.
@@ -331,6 +336,7 @@ void sqlite3FinishTrigger(
   if( NEVER(pParse->nErr) || !pTrig ) goto triggerfinish_cleanup;
   zName = pTrig->zName;
   iDb = sqlite3SchemaToIndex(pParse->db, pTrig->pSchema);
+  assert( iDb>=00 && iDb<db->nDb );
   pTrig->step_list = pStepList;
   while( pStepList ){
     pStepList->pTrig = pTrig;
@@ -814,6 +820,7 @@ static SQLITE_NOINLINE Trigger *triggersReallyExist(
     p = pList;
     if( (pParse->db->flags & SQLITE_EnableTrigger)==0
      && pTab->pTrigger!=0
+     && sqlite3SchemaToIndex(pParse->db, pTab->pTrigger->pSchema)!=1
     ){
       /* The SQLITE_DBCONFIG_ENABLE_TRIGGER setting is off.  That means that
       ** only TEMP triggers are allowed.  Truncate the pList so that it

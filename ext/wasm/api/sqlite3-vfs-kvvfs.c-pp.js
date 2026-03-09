@@ -146,9 +146,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
          kvvfsMethods.$nBufferSize is slightly larger than the output
          space needed for a kvvfs-encoded 64kb db page in a worse-cast
          encoding (128kb). It is not suitable for arbitrary buffer
-         use, only page de/encoding.  As the VFS system has no hook
-         into library finalization, these buffers are effectively
-         leaked except in the few places which use memBufferFree().
+         use, only page de/encoding.
       */
       n: kvvfsMethods.$nBufferSize,
       /**
@@ -187,10 +185,10 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
 
   const noop = ()=>{};
   const debug = sqlite3.__isUnderTest
-        ? (...args)=>sqlite3.config.debug("kvvfs:", ...args)
+        ? (...args)=>sqlite3.config.debug?.("kvvfs:", ...args)
         : noop;
-  const warn = (...args)=>sqlite3.config.warn("kvvfs:", ...args);
-  const error = (...args)=>sqlite3.config.error("kvvfs:", ...args);
+  const warn = (...args)=>sqlite3.config.warn?.("kvvfs:", ...args);
+  const error = (...args)=>sqlite3.config.error?.("kvvfs:", ...args);
 
   /**
      Implementation of JS's Storage interface for use as backing store
@@ -211,17 +209,21 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
      and recreating it whenever a property index might be invalidated.
   */
   class KVVfsStorage {
-    #map;
-    #keys;
-    #getKeys(){return this.#keys ??= Object.keys(this.#map);}
+    #map = Object.create(null);
+    #keys = null;
+    #size = 0;
 
     constructor(){
       this.clear();
     }
 
+    #getKeys(){
+      return this.#keys ??= Object.keys(this.#map);
+    }
+
     key(n){
-      const k = this.#getKeys();
-      return n<k.length ? k[n] : null;
+      if(n < 0 || n >= this.#size) return null;
+      return this.#getKeys()[n];
     }
 
     getItem(k){
@@ -229,14 +231,17 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     }
 
     setItem(k,v){
-      if( !hop(this.#map, k) ){
+      if( !(k in this.#map) ){
+        ++this.#size;
         this.#keys = null;
       }
       this.#map[k] = ''+v;
     }
 
     removeItem(k){
-      if( delete this.#map[k] ){
+      if( k in this.#map ){
+        delete this.#map[k];
+        --this.#size;
         this.#keys = null;
       }
     }
@@ -244,10 +249,11 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     clear(){
       this.#map = Object.create(null);
       this.#keys = null;
+      this.#size = 0;
     }
 
     get length() {
-      return this.#getKeys().length;
+      return this.#size;
     }
   }/*KVVfsStorage*/;
 
@@ -1013,7 +1019,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
           util.assert(h, "Missing KVVfsFile handle");
           kvvfs?.log?.xFileControl && debug("xFileControl",h,'op =',opId);
           if( opId===capi.SQLITE_FCNTL_PRAGMA
-              && kvvfs.internal.disablePageSizeChange ){
+              && kvvfsInternal.disablePageSizeChange ){
             /* pArg== length-3 (char**) */
             //const argv = wasm.cArgvToJs(3, pArg); // the easy way
             const zName = wasm.peekPtr(wasm.ptr.add(pArg, wasm.ptr.size));
@@ -1899,7 +1905,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
               }
               return rc;
             }catch(e){
-              return VT.xErrror('xConnect', e, capi.SQLITE_ERROR);
+              return VT.xError('xConnect', e, capi.SQLITE_ERROR);
             }
           },
           xCreate: wasm.ptr.null, // eponymous only

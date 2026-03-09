@@ -957,6 +957,7 @@ FUZZCHECK_OPT += -I$(TOP)/test
 FUZZCHECK_OPT += -I$(TOP)/ext/recover
 FUZZCHECK_OPT += \
   -DSQLITE_OSS_FUZZ \
+  -DSQLITE_DECIMAL_MAX_DIGIT=1000 \
   -DSQLITE_ENABLE_BYTECODE_VTAB \
   -DSQLITE_ENABLE_CARRAY \
   -DSQLITE_ENABLE_DBPAGE_VTAB \
@@ -988,13 +989,26 @@ FUZZCHECK_OPT += \
   -DSQLITE_STRICT_SUBTYPE=1 \
   -DSQLITE_STATIC_RANDOMJSON
 
-FUZZCHECK_SRC += $(TOP)/test/fuzzcheck.c
-FUZZCHECK_SRC += $(TOP)/test/ossfuzz.c
-FUZZCHECK_SRC += $(TOP)/test/fuzzinvariants.c
-FUZZCHECK_SRC += $(TOP)/ext/recover/dbdata.c
-FUZZCHECK_SRC += $(TOP)/ext/recover/sqlite3recover.c
-FUZZCHECK_SRC += $(TOP)/test/vt02.c
-FUZZCHECK_SRC += $(TOP)/ext/misc/randomjson.c
+FUZZCHECK_SRC = sqlite3.c \
+   $(TOP)/test/fuzzcheck.c \
+   $(TOP)/test/ossfuzz.c \
+   $(TOP)/test/fuzzinvariants.c \
+   $(TOP)/ext/recover/dbdata.c \
+   $(TOP)/ext/recover/sqlite3recover.c \
+   $(TOP)/test/vt02.c \
+   $(TOP)/ext/misc/base64.c \
+   $(TOP)/ext/misc/base85.c \
+   $(TOP)/ext/misc/completion.c \
+   $(TOP)/ext/misc/decimal.c \
+   $(TOP)/ext/misc/ieee754.c \
+   $(TOP)/ext/misc/randomjson.c \
+   $(TOP)/ext/misc/regexp.c \
+   $(TOP)/ext/misc/series.c \
+   $(TOP)/ext/misc/shathree.c \
+   $(TOP)/ext/misc/sha1.c \
+   $(TOP)/ext/misc/stmtrand.c
+
+FUZZCHECK_DEP = sqlite3.h
 DBFUZZ_OPT =
 ST_OPT = -DSQLITE_OS_KV_OPTIONAL
 
@@ -1796,7 +1810,7 @@ TESTFIXTURE_SRC += $(TESTFIXTURE_SRC$(USE_AMALGAMATION))
 testfixture$(T.exe):	$(T.tcl.env.sh) has_tclsh85 $(TESTFIXTURE_SRC)
 	$(T.link.tcl) -DSQLITE_NO_SYNC=1 $(TESTFIXTURE_FLAGS) \
 		-o $@ $(TESTFIXTURE_SRC) \
-		$$TCL_LIB_SPEC $$TCL_INCLUDE_SPEC \
+		$$TCL_LIB_SPEC $$TCL_INCLUDE_SPEC $$TCL_LIBS \
 		$(LDFLAGS.libsqlite3)
 
 coretestprogs:	testfixture$(B.exe) sqlite3$(B.exe)
@@ -1862,6 +1876,9 @@ mdevtest: srctree-check has_tclsh85
 
 sdevtest: has_tclsh85
 	$(TCLSH_CMD) $(TOP)/test/testrunner.tcl sdevtest $(TSTRNNR_OPTS)
+
+retest: has_tclsh85
+	$(TCLSH_CMD) $(TOP)/test/testrunner.tcl retest
 
 errors:
 	$(TCLSH_CMD) $(TOP)/test/testrunner.tcl errors
@@ -1968,24 +1985,6 @@ sqlite3_expert$(T.exe): $(TOP)/ext/expert/sqlite3expert.h $(TOP)/ext/expert/sqli
 		$(TOP)/ext/expert/expert.c sqlite3.c -o sqlite3_expert $(LDFLAGS.libsqlite3)
 xbin: sqlite3_expert$(T.exe)
 
-CHECKER_DEPS =\
-  $(TOP)/tool/mkccode.tcl \
-  sqlite3.c \
-  tclsqlite-ex.c \
-  $(TOP)/ext/repair/sqlite3_checker.tcl \
-  $(TOP)/ext/repair/checkindex.c \
-  $(TOP)/ext/repair/checkfreelist.c \
-  $(TOP)/ext/misc/btreeinfo.c \
-  $(TOP)/ext/repair/sqlite3_checker.c.in
-
-sqlite3_checker.c:	$(CHECKER_DEPS)
-	$(B.tclsh) $(TOP)/tool/mkccode.tcl $(TOP)/ext/repair/sqlite3_checker.c.in >$@
-
-sqlite3_checker$(T.exe):	$(T.tcl.env.sh) sqlite3_checker.c
-	$(T.link.tcl) sqlite3_checker.c -o $@ $$TCL_INCLUDE_SPEC \
-		$$TCL_LIB_SPEC $(LDFLAGS.libsqlite3)
-xbin: sqlite3_checker$(T.exe)
-
 dbdump$(T.exe): $(TOP)/ext/misc/dbdump.c sqlite3.o
 	$(T.link) -DDBDUMP_STANDALONE -o $@ \
 		$(TOP)/ext/misc/dbdump.c sqlite3.o $(LDFLAGS.libsqlite3)
@@ -2013,6 +2012,10 @@ xbin: showwal$(T.exe)
 
 showshm$(T.exe):	$(TOP)/tool/showshm.c
 	$(T.link) -o $@ $(TOP)/tool/showshm.c $(LDFLAGS.configure)
+xbin: showshm$(T.exe)
+
+showtmlog$(T.exe):	$(TOP)/tool/showtmlog.c
+	$(T.link) -o $@ $(TOP)/tool/showtmlog.c $(LDFLAGS.configure)
 xbin: showshm$(T.exe)
 
 index_usage$(T.exe): $(TOP)/tool/index_usage.c sqlite3.o
@@ -2113,16 +2116,19 @@ src-archives: sqlite-amalgamation.zip amalgamation-tarball sqlite-src.zip
 
 # Build a ZIP archive containing various command-line tools.
 #
-tool-zip:	testfixture$(T.exe) sqlite3$(T.exe) sqldiff$(T.exe) \
+tool-zip:	sqlite3$(T.exe) sqldiff$(T.exe) \
             sqlite3_analyzer$(T.exe) sqlite3_rsync$(T.exe) $(TOP)/tool/mktoolzip.tcl
 	strip sqlite3$(T.exe) sqldiff$(T.exe) sqlite3_analyzer$(T.exe) sqlite3_rsync$(T.exe)
-	./testfixture$(T.exe) $(TOP)/tool/mktoolzip.tcl
+	$(TCLSH_CMD) $(TOP)/tool/mktoolzip.tcl
+
 snapshot-zip:	testfixture$(T.exe) sqlite3$(T.exe) sqldiff$(T.exe) \
             sqlite3_analyzer$(T.exe) sqlite3_rsync$(T.exe) $(TOP)/tool/mktoolzip.tcl
 	strip sqlite3$(T.exe) sqldiff$(T.exe) sqlite3_analyzer$(T.exe) sqlite3_rsync$(T.exe)
-	./testfixture$(T.exe) $(TOP)/tool/mktoolzip.tcl --snapshot
+	$(TCLSH_CMD) $(TOP)/tool/mktoolzip.tcl --snapshot
+
 clean-tool-zip:
 	rm -f sqlite-tools-*.zip
+
 clean: clean-tool-zip
 
 #
@@ -2269,23 +2275,23 @@ fuzzershell$(T.exe):	$(TOP)/tool/fuzzershell.c sqlite3.c sqlite3.h
 fuzzy: fuzzershell$(T.exe)
 xbin: fuzzershell$(T.exe)
 
-fuzzcheck$(T.exe):	$(FUZZCHECK_SRC) sqlite3.c sqlite3.h $(FUZZCHECK_DEP)
-	$(T.link) -o $@ $(FUZZCHECK_OPT) $(FUZZCHECK_SRC) sqlite3.c $(LDFLAGS.libsqlite3)
+fuzzcheck$(T.exe):	$(FUZZCHECK_SRC) $(FUZZCHECK_DEP)
+	$(T.link) -o $@ $(FUZZCHECK_OPT) $(FUZZCHECK_SRC) $(LDFLAGS.libsqlite3)
 fuzzy: fuzzcheck$(T.exe)
 xbin: fuzzcheck$(T.exe)
 
 # -fsanitize=... flags for fuzzcheck-asan.
 CFLAGS.fuzzcheck-asan.fsanitize ?= -fsanitize=address
 
-fuzzcheck-asan$(T.exe):	$(FUZZCHECK_SRC) sqlite3.c sqlite3.h $(FUZZCHECK_DEP)
+fuzzcheck-asan$(T.exe):	$(FUZZCHECK_SRC) $(FUZZCHECK_DEP)
 	$(T.link) -o $@ $(CFLAGS.fuzzcheck-asan.fsanitize) $(FUZZCHECK_OPT) $(FUZZCHECK_SRC) \
-		sqlite3.c $(LDFLAGS.libsqlite3)
+		$(LDFLAGS.libsqlite3)
 fuzzy: fuzzcheck-asan$(T.exe)
 xbin: fuzzcheck-asan$(T.exe)
 
-fuzzcheck-ubsan$(T.exe):	$(FUZZCHECK_SRC) sqlite3.c sqlite3.h $(FUZZCHECK_DEP)
+fuzzcheck-ubsan$(T.exe):	$(FUZZCHECK_SRC) $(FUZZCHECK_DEP)
 	$(T.link) -o $@ -fsanitize=undefined $(FUZZCHECK_OPT) $(FUZZCHECK_SRC) \
-		sqlite3.c $(LDFLAGS.libsqlite3)
+		$(LDFLAGS.libsqlite3)
 fuzzy: fuzzcheck-ubsan$(T.exe)
 xbin: fuzzcheck-ubsan$(T.exe)
 
