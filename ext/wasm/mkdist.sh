@@ -83,57 +83,18 @@ buildName=${buildName}${snapshotSuffix}
 echo "Creating the SQLite wasm dist bundle..."
 
 #
-# Generates files which, when built, will also build all of the pieces
-# neaded for the dist bundle.
+# Build only the library deliverables (b-all). Demo and test apps are
+# intentionally NOT built or bundled.
 #
-tgtFiles=(
-    demo-worker1-promiser.html
-    demo-worker1-promiser.js
-    demo-worker1-promiser-esm.html
-    demo-worker1-promiser.mjs
-
-    tester1.html
-    tester1-esm.html
-    tester1-worker.html
-    tester1.js
-    tester1.mjs
-)
-
-if [[ 1 = $b64 ]]; then
-    tgtFiles+=(
-        tester1-64bit.html
-        tester1-esm-64bit.html
-        tester1-worker-64bit.html
-        tester1-64bit.js
-        tester1-64bit.mjs
-    )
-fi
-
 [[ 1 = $clean ]] && $make clean
 $make $makeFlag \
       t-version-info t-stripccomments \
-      ${tgtFiles[@]} \
+      b-all \
       "emcc_opt=${optFlag}" || die $?
 
 dirTmp=d.dist
 rm -fr $dirTmp
 mkdir -p $dirTmp/jswasm || die $?
-mkdir -p $dirTmp/common || die $?
-
-# Static files for the top-most dir:
-fTop=(
-    demo-123.html
-    demo-123-worker.html
-    demo-123.js
-
-    demo-worker1.html
-    demo-worker1.js
-
-    demo-jsstorage.html
-    demo-jsstorage.js
-
-    module-symbols.html
-)
 
 # Files for the jswasm subdir sans jswasm prefix:
 #
@@ -142,15 +103,10 @@ fTop=(
 fJ1=(
     sqlite3-opfs-async-proxy.js
     sqlite3-worker1.js
-    sqlite3-worker1.mjs
-    sqlite3-worker1-bundler-friendly.mjs
     sqlite3-worker1-promiser.js
-    sqlite3-worker1-promiser.mjs
-    sqlite3-worker1-promiser-bundler-friendly.mjs
 )
 fJ2=(
     sqlite3.js
-    sqlite3.mjs
 )
 
 # fW = list of wasm files to copy from jswasm/.
@@ -169,14 +125,7 @@ function scc(){
 }
 
 jw=jswasm
-fcp ${tgtFiles[@]} $dirTmp/.
 fcp README-dist.txt $dirTmp/README.txt
-fcp index-dist.html $dirTmp/index.html
-fcp common/*.css common/SqliteTestUtil.js $dirTmp/common/.
-
-for i in ${fTop[@]}; do
-    fcp $i $dirTmp/.
-done
 
 for i in ${fW[@]}; do
     fcp $jw/$i $dirTmp/$jw/.
@@ -191,20 +140,17 @@ for i in ${fJ2[@]}; do
 done
 
 #
-# Done copying files. Now zip it up...
+# Done copying files. Now place them directly under the output dir
+# (no version-named subfolder).
 #
-svi=./version-info
-vnum=$($svi --download-version)
-[ "" = "$vnum" ] && die "version number is empty!"
-vdir=${buildName}-${vnum}
-fzip=${vdir}.zip
-rm -fr ${vdir} ${fzip}
-mv $dirTmp $vdir || die $?
-zip -rq9 $fzip $(find $vdir -type f | sort) || die $?
-ls -la $fzip
-unzip -lv $fzip || die $?
+# distOut = directory (relative to ext/wasm) where deliverables are placed.
+distOut=../../dist
+mkdir -p "$distOut" || die $?
+rm -fr "$distOut/jswasm" "$distOut/README.txt"
+mv "$dirTmp"/* "$distOut"/ || die $?
+rm -fr "$dirTmp"
 cat <<EOF
 **
-** Unzipped files are in $vdir
+** Files are in $distOut
 **
 EOF
