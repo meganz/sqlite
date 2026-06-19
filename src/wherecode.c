@@ -2297,7 +2297,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     ** by this loop in the a[0] slot and all notReady tables in a[1..] slots.
     ** This becomes the SrcList in the recursive call to sqlite3WhereBegin().
     */
-    if( pWInfo->nLevel>1 ){
+    if( pWInfo->nLevel>1 || pTabItem->fg.fromExists ){
       int nNotReady;                 /* The number of notReady tables */
       SrcItem *origSrc;              /* Original list of tables */
       nNotReady = pWInfo->nLevel - iLevel - 1;
@@ -2310,6 +2310,13 @@ Bitmask sqlite3WhereCodeOneLoopStart(
       for(k=1; k<=nNotReady; k++){
         memcpy(&pOrTab->a[k], &origSrc[pLevel[k].iFrom], sizeof(pOrTab->a[k]));
       }
+
+      /* Clear the fromExists flag on the OR-optimized table entry so that
+      ** the calls to sqlite3WhereEnd() do not code early-exits after the
+      ** first row is visited. The early exit applies to this table's
+      ** overall loop - including the multiple OR branches and any WHERE
+      ** conditions not passed to the sub-loops - not to the sub-loops.  */
+      pOrTab->a[0].fg.fromExists = 0;
     }else{
       pOrTab = pWInfo->pTabList;
     }
@@ -2553,7 +2560,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     assert( pLevel->op==OP_Return );
     pLevel->p2 = sqlite3VdbeCurrentAddr(v);
 
-    if( pWInfo->nLevel>1 ){ sqlite3DbFreeNN(db, pOrTab); }
+    if( pWInfo->pTabList!=pOrTab ){ sqlite3DbFreeNN(db, pOrTab); }
     if( !untestedTerms ) disableTerm(pLevel, pTerm);
   }else
 #endif /* SQLITE_OMIT_OR_OPTIMIZATION */
@@ -2710,6 +2717,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
                     WO_EQ|WO_IN|WO_IS, 0);
     if( pAlt==0 ) continue;
     if( pAlt->wtFlags & (TERM_CODED) ) continue;
+    if( ExprHasProperty(pAlt->pExpr, EP_Collate) ) continue;
     if( (pAlt->eOperator & WO_IN)
      && ExprUseXSelect(pAlt->pExpr)
      && (pAlt->pExpr->x.pSelect->pEList->nExpr>1)
@@ -2891,6 +2899,15 @@ SQLITE_NOINLINE void sqlite3WhereRightJoinLoop(
       pSubWhere = sqlite3ExprAnd(pParse, pSubWhere,
                                  sqlite3ExprDup(pParse->db, pTerm->pExpr, 0));
     }
+  }
+  if( pLevel->iIdxCur ){
+    /* pSubWhere may contain expressions that read from an index on the
+    ** table on the RHS of the right join. All such expressions first test
+    ** if the index is pointing at a NULL row, and if so, read from the
+    ** table cursor instead. So ensure that the index cursor really is 
+    ** pointing at a NULL row here, so that no values are read from it during
+    ** the scan of the RHS of the RIGHT join below.  */
+    sqlite3VdbeAddOp1(v, OP_NullRow, pLevel->iIdxCur);
   }
   pFrom = &uSrc.sSrc;
   pFrom->nSrc = 1;

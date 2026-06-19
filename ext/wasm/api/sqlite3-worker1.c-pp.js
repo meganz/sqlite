@@ -49,7 +49,7 @@ import sqlite3InitModule from './sqlite3.mjs';
   //console.warn("worker1 theJs =",theJs);
   importScripts(theJs);
 }
-//#endif
+//#/if
 sqlite3InitModule().then(sqlite3 => {
   const _installOpfsPool = async () => {
 
@@ -196,4 +196,4 @@ sqlite3InitModule().then(sqlite3 => {
 });
 //#else
 /* Built with the omit-oo1 flag. */
-//#endif if not omit-oo1
+//#/if if not omit-oo1

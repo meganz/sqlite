@@ -1896,9 +1896,6 @@ RSYNC_OPT = \
 sqlite3_rsync.exe:	$(RSYNC_SRC) $(LIBRESOBJS)
 	$(LTLINK) $(RSYNC_OPT) $(NO_WARN) $(RSYNC_SRC) /link $(LDFLAGS) $(LTLINKOPTS) $(LIBRESOBJS)
 
-scrub.exe:	$(TOP)\ext\misc\scrub.c $(SQLITE3C) $(SQLITE3H)
-	$(LTLINK) $(NO_WARN) -DSCRUB_STANDALONE=1 $(TOP)\ext\misc\scrub.c $(SQLITE3C) /link $(LDFLAGS) $(LTLINKOPTS)
-
 srcck1.exe:	$(TOP)\tool\srcck1.c
 	$(BCC) $(NO_WARN) -Fe$@ $(TOP)\tool\srcck1.c
 
@@ -2551,43 +2548,19 @@ coretestprogs:	testfixture.exe sqlite3.exe
 
 testprogs:	$(TESTPROGS) srcck1.exe fuzzcheck.exe sessionfuzz.exe
 
-fulltest:	alltest fuzztest
-
-alltest:	$(TESTPROGS)
-	@set PATH=$(LIBTCLPATH);$(PATH)
-	.\testfixture.exe $(TOP)\test\all.test $(TESTOPTS)
-
-soaktest:	$(TESTPROGS)
-	@set PATH=$(LIBTCLPATH);$(PATH)
-	.\testfixture.exe $(TOP)\test\all.test -soak=1 $(TESTOPTS)
-
-fulltestonly:	$(TESTPROGS) fuzztest
-	@set PATH=$(LIBTCLPATH);$(PATH)
-	.\testfixture.exe $(TOP)\test\full.test
-
-queryplantest:	testfixture.exe shell
-	@set PATH=$(LIBTCLPATH);$(PATH)
-	.\testfixture.exe $(TOP)\test\permutations.test queryplanner $(TESTOPTS)
-
 fuzztest:	fuzzcheck.exe
 	.\fuzzcheck.exe $(FUZZDATA)
 
-# Legacy testing target for third-party integrators.  The SQLite
-# developers seldom use this target themselves.  Instead
-# they use "nmake /f Makefile.msc devtest" which runs tests on
-# a standard set of options
 #
-test:	$(TESTPROGS) sourcetest fuzztest tcltest
-
-# Minimal testing that runs in less than 3 minutes (on a fast machine)
+# Legacy testing targets, no longer used by the developers and
+# now aliased to one of the commonly used testing targets.
 #
-quicktest:	testfixture.exe sourcetest
-	@set PATH=$(LIBTCLPATH);$(PATH)
-	.\testfixture.exe $(TOP)\test\extraquick.test $(TESTOPTS)
-
-# This is the common case.  Run many tests that do not take too long,
-# including fuzzcheck, sqlite3_analyzer, and sqldiff tests.
-#
+quicktest:	devtest
+test:	devtest
+fulltest:	releasetest
+alltest:	releasetest
+soaktest:	releasetest
+fulltestonly:	releasetest
 
 # The veryquick.test TCL tests.
 #
@@ -2650,6 +2623,12 @@ xdevtest:
 smoketest:	$(TESTPROGS)
 	@set PATH=$(LIBTCLPATH);$(PATH)
 	.\testfixture.exe $(TOP)\test\main.test $(TESTOPTS)
+
+# Measure the performance of floating-point conversions.
+#
+fp-speed-test:	fp-speed-1.exe fp-speed-2.exe
+	fp-speed-1 1000000
+	fp-speed-2 1000000
 
 shelltest:
 	$(TCLSH_CMD) $(TOP)\test\testrunner.tcl release shell
@@ -2742,6 +2721,14 @@ wordcount.exe:	$(TOP)\test\wordcount.c $(SQLITE3C) $(SQLITE3H)
 speedtest1.exe:	$(TOP)\test\speedtest1.c $(SQLITE3C) $(SQLITE3H)
 	$(LTLINK) $(NO_WARN) $(ST_COMPILE_OPTS) -DSQLITE_OMIT_LOAD_EXTENSION \
 		$(TOP)\test\speedtest1.c $(SQLITE3C) /link $(LDFLAGS) $(LTLINKOPTS)
+
+fp-speed-1.exe:	$(TOP)\test\fp-speed-1.c $(SQLITE3C) $(SQLITE3H)
+	$(LTLINK) $(NO_WARN) $(ST_COMPILE_OPTS) -DSQLITE_OMIT_LOAD_EXTENSION \
+		$(TOP)\test\fp-speed-1.c $(SQLITE3C) /link $(LDFLAGS) $(LTLINKOPTS)
+
+fp-speed-2.exe:	$(TOP)\test\fp-speed-2.c $(SQLITE3C) $(SQLITE3H)
+	$(LTLINK) $(NO_WARN) $(ST_COMPILE_OPTS) -DSQLITE_OMIT_LOAD_EXTENSION \
+		$(TOP)\test\fp-speed-2.c $(SQLITE3C) /link $(LDFLAGS) $(LTLINKOPTS)
 
 kvtest.exe:	$(TOP)\test\kvtest.c $(SQLITE3C) $(SQLITE3H)
 	$(LTLINK) $(NO_WARN) $(KV_COMPILE_OPTS) \
@@ -2932,6 +2919,7 @@ clean:
 	del /Q LogEst.exe fts3view.exe rollback-test.exe showdb.exe dbdump.exe 2>NUL
 	del /Q changeset.exe 2>NUL
 	del /Q showjournal.exe showstat4.exe showwal.exe speedtest1.exe 2>NUL
+	del /Q fp-speed-1.exe fp-speed-2.exe 2>NUL
 	del /Q mptester.exe wordcount.exe rbu.exe srcck1.exe 2>NUL
 	del /Q sqlite3.c sqlite3-*.c sqlite3.h 2>NUL
 	del /Q sqlite3rc.h 2>NUL

@@ -166,7 +166,7 @@ struct Rtree {
   u8 eCoordType;              /* RTREE_COORD_REAL32 or RTREE_COORD_INT32 */
   u8 nBytesPerCell;           /* Bytes consumed per cell */
   u8 inWrTrans;               /* True if inside write transaction */
-  u8 nAux;                    /* # of auxiliary columns in %_rowid */
+  u16 nAux;                   /* # of auxiliary columns in %_rowid */
 #ifdef SQLITE_ENABLE_GEOPOLY
   u8 nAuxNotNull;             /* Number of initial not-null aux columns */
 #endif
@@ -1037,7 +1037,17 @@ static void rtreeRelease(Rtree *pRtree){
     pRtree->inWrTrans = 0;
     assert( pRtree->nCursor==0 );
     nodeBlobReset(pRtree);
-    assert( pRtree->nNodeRef==0 || pRtree->bCorrupt );
+    if( pRtree->nNodeRef ){
+      int i;
+      assert( pRtree->bCorrupt );
+      for(i=0; i<HASHSIZE; i++){
+        while( pRtree->aHash[i] ){
+          RtreeNode *pNext = pRtree->aHash[i]->pNext;
+          sqlite3_free(pRtree->aHash[i]);
+          pRtree->aHash[i] = pNext;
+        }
+      }
+    }
     sqlite3_finalize(pRtree->pWriteNode);
     sqlite3_finalize(pRtree->pDeleteNode);
     sqlite3_finalize(pRtree->pReadRowid);
@@ -1392,7 +1402,7 @@ static int nodeRowidIndex(
 ){
   int ii;
   int nCell = NCELL(pNode);
-  assert( nCell<200 );
+  assert( nCell<65536 && nCell>=0 );
   for(ii=0; ii<nCell; ii++){
     if( nodeGetRowid(pRtree, pNode, ii)==iRowid ){
       *piIndex = ii;
@@ -1654,7 +1664,10 @@ static int rtreeStepToLeaf(RtreeCursor *pCur){
     pNode = rtreeNodeOfFirstSearchPoint(pCur, &rc);
     if( rc ) return rc;
     nCell = NCELL(pNode);
-    assert( nCell<200 );
+    if( nCell>RTREE_MAXCELLS ){
+      RTREE_IS_CORRUPT(pRtree);
+      return SQLITE_CORRUPT_VTAB;
+    }
     pCellData = pNode->zData + (4+pRtree->nBytesPerCell*p->iCell);
     while( p->iCell<nCell ){
       sqlite3_rtree_dbl rScore = (sqlite3_rtree_dbl)-1;
@@ -2329,7 +2342,7 @@ static int AdjustTree(
     int iCell;
 
     cnt++;
-    if( NEVER(cnt>100) ){
+    if( cnt>100 ){
       RTREE_IS_CORRUPT(pRtree);
       return SQLITE_CORRUPT_VTAB;
     }
@@ -2687,15 +2700,6 @@ static int SplitNode(
     rc = updateMapping(pRtree, pCell->iRowid, pLeft, iHeight);
   }
 
-  if( rc==SQLITE_OK ){
-    rc = nodeRelease(pRtree, pRight);
-    pRight = 0;
-  }
-  if( rc==SQLITE_OK ){
-    rc = nodeRelease(pRtree, pLeft);
-    pLeft = 0;
-  }
-
 splitnode_out:
   nodeRelease(pRtree, pRight);
   nodeRelease(pRtree, pLeft);
@@ -2880,7 +2884,7 @@ static int rtreeInsertCell(
     rc = SplitNode(pRtree, pNode, pCell, iHeight);
   }else{
     rc = AdjustTree(pRtree, pNode, pCell);
-    if( ALWAYS(rc==SQLITE_OK) ){
+    if( rc==SQLITE_OK ){
       if( iHeight==0 ){
         rc = rowidWrite(pRtree, pCell->iRowid, pNode->iNode);
       }else{
@@ -3640,7 +3644,7 @@ static int rtreeInit(
     "Auxiliary rtree columns must be last"                /* 4 */
   };
 
-  assert( RTREE_MAX_AUX_COLUMN<256 ); /* Aux columns counted by a u8 */
+  assert( RTREE_MAX_AUX_COLUMN<256 );
   if( argc<6 || argc>RTREE_MAX_AUX_COLUMN+3 ){
     *pzErr = sqlite3_mprintf("%s", aErrMsg[2 + (argc>=6)]);
     return SQLITE_ERROR;

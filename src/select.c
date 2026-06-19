@@ -7324,6 +7324,7 @@ static SQLITE_NOINLINE void existsToJoin(
    && !ExprHasProperty(pWhere, EP_OuterON|EP_InnerON) 
    && ALWAYS(p->pSrc!=0)
    && p->pSrc->nSrc<BMS
+   && (p->pLimit==0 || p->pLimit->pRight==0)
   ){
     if( pWhere->op==TK_AND ){
       Expr *pRight = pWhere->pRight;
@@ -7371,7 +7372,6 @@ static SQLITE_NOINLINE void existsToJoin(
           sqlite3TreeViewSelect(0, p, 0);
         }
 #endif
-        existsToJoin(pParse, p, pSubWhere);
       }
     }
   }
@@ -7432,8 +7432,11 @@ static int selectCheckOnClausesExpr(Walker *pWalker, Expr *pExpr){
     ** does not refer to a table to the right of CheckOnCtx.iJoin. */
     do {
       SrcList *pSrc = pCtx->pSrc;
+      int nSrc = pSrc->nSrc;
       int iTab = pExpr->iTable;
-      if( iTab>=pSrc->a[0].iCursor && iTab<=pSrc->a[pSrc->nSrc-1].iCursor ){
+      int ii;
+      for(ii=0; ii<nSrc && pSrc->a[ii].iCursor!=iTab; ii++){}
+      if( ii<nSrc ){
         if( pCtx->iJoin && iTab>pCtx->iJoin ){
           sqlite3ErrorMsg(pWalker->pParse, 
               "%s references tables to its right",

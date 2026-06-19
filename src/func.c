@@ -326,9 +326,18 @@ static void printfFunc(
     sqlite3StrAccumInit(&str, db, 0, 0, db->aLimit[SQLITE_LIMIT_LENGTH]);
     str.printfFlags = SQLITE_PRINTF_SQLFUNC;
     sqlite3_str_appendf(&str, zFormat, &x);
-    n = str.nChar;
-    sqlite3_result_text(context, sqlite3StrAccumFinish(&str), n,
-                        SQLITE_DYNAMIC);
+    if( str.accError==SQLITE_OK ){
+      n = str.nChar;
+      sqlite3_result_text(context, sqlite3StrAccumFinish(&str), n,
+                          SQLITE_DYNAMIC);
+    }else{
+      if( str.accError==SQLITE_NOMEM ){
+        sqlite3_result_error_nomem(context);
+      }else{
+        sqlite3_result_error_toobig(context);
+      }
+      sqlite3_str_reset(&str);
+    }
   }
 }
 
@@ -1098,18 +1107,11 @@ void sqlite3QuoteValue(StrAccum *pStr, sqlite3_value *pValue, int bEscape){
 
   switch( sqlite3_value_type(pValue) ){
     case SQLITE_FLOAT: {
-      double r1, r2;
-      const char *zVal;
-      r1 = sqlite3_value_double(pValue);
-      sqlite3_str_appendf(pStr, "%!0.15g", r1);
-      zVal = sqlite3_str_value(pStr);
-      if( zVal ){
-        sqlite3AtoF(zVal, &r2);
-        if( r1!=r2 ){
-          sqlite3_str_reset(pStr);
-          sqlite3_str_appendf(pStr, "%!0.20e", r1);
-        }
-      }
+                             /*    ,---  Show infinity as 9.0e+999
+                             **    |   
+                             **    | ,--- 17 precision guarantees round-trip
+                             **    v v                                       */
+      sqlite3_str_appendf(pStr, "%!0.17g", sqlite3_value_double(pValue));
       break;
     }
     case SQLITE_INTEGER: {
@@ -1973,11 +1975,16 @@ static void sumInverse(sqlite3_context *context, int argc, sqlite3_value**argv){
     assert( p->cnt>0 );
     p->cnt--;
     if( !p->approx ){
-      if( sqlite3SubInt64(&p->iSum, sqlite3_value_int64(argv[0])) ){
-        p->ovrfl = 1;
-        p->approx = 1;
+      i64 x = p->iSum;
+      if( sqlite3SubInt64(&x, sqlite3_value_int64(argv[0]))==0 ){
+        p->iSum = x;
+        return;
       }
-    }else if( type==SQLITE_INTEGER ){
+      p->ovrfl = 1;
+      p->approx = 1;
+      kahanBabuskaNeumaierInit(p, p->iSum);
+    }
+    if( type==SQLITE_INTEGER ){
       i64 iVal = sqlite3_value_int64(argv[0]);
       if( iVal!=SMALLEST_INT64 ){
         kahanBabuskaNeumaierStepInt64(p, -iVal);
@@ -2949,47 +2956,46 @@ static void percentSort(double *a, unsigned int n){
   int iGt;  /* Entries at or after a[iGt] are greater than rPivot */
   int i;         /* Loop counter */
   double rPivot; /* The pivot value */
-  
-  assert( n>=2 );
-  if( a[0]>a[n-1] ){
-    SWAP_DOUBLE(a[0],a[n-1])
-  }
-  if( n==2 ) return;
-  iGt = n-1;
-  i = n/2;
-  if( a[0]>a[i] ){
-    SWAP_DOUBLE(a[0],a[i])
-  }else if( a[i]>a[iGt] ){
-    SWAP_DOUBLE(a[i],a[iGt])
-  }
-  if( n==3 ) return;
-  rPivot = a[i];
-  iLt = i = 1;
-  do{
-    if( a[i]<rPivot ){
-      if( i>iLt ) SWAP_DOUBLE(a[i],a[iLt])
-      iLt++;
-      i++;
-    }else if( a[i]>rPivot ){
-      do{
-        iGt--;
-      }while( iGt>i && a[iGt]>rPivot );
-      SWAP_DOUBLE(a[i],a[iGt])
-    }else{
-      i++;
-    }
-  }while( i<iGt );
-  if( iLt>=2 ) percentSort(a, iLt);
-  if( n-iGt>=2 ) percentSort(a+iGt, n-iGt);
-    
-/* Uncomment for testing */
-#if 0
-  for(i=0; i<n-1; i++){
-    assert( a[i]<=a[i+1] );
-  }
-#endif
-}
 
+  while( n>=2 ){
+    if( a[0]>a[n-1] ){
+      SWAP_DOUBLE(a[0],a[n-1])
+    }
+    if( n==2 ) return;
+    iGt = n-1;
+    i = n/2;
+    if( a[0]>a[i] ){
+      SWAP_DOUBLE(a[0],a[i])
+    }else if( a[i]>a[iGt] ){
+      SWAP_DOUBLE(a[i],a[iGt])
+    }
+    if( n==3 ) return;
+    rPivot = a[i];
+    iLt = i = 1;
+    do{
+      if( a[i]<rPivot ){
+        if( i>iLt ) SWAP_DOUBLE(a[i],a[iLt])
+        iLt++;
+        i++;
+      }else if( a[i]>rPivot ){
+        do{
+          iGt--;
+        }while( iGt>i && a[iGt]>rPivot );
+        SWAP_DOUBLE(a[i],a[iGt])
+      }else{
+        i++;
+      }
+    }while( i<iGt );
+    if( iLt>n/2 ){
+      if( n-iGt>=2 ) percentSort(a+iGt, n-iGt);
+      n = iLt;
+    }else{
+      if( iLt>=2 ) percentSort(a, iLt);
+      a += iGt;
+      n -= iGt;
+    }
+  }
+}
 
 /*
 ** The "inverse" function for percentile(Y,P) is called to remove a

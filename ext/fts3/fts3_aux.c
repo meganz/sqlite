@@ -325,7 +325,7 @@ static int fts3auxNextMethod(sqlite3_vtab_cursor *pCursor){
             pCsr->aStat[1].nDoc++;
           }
           eState = 2;
-          /* fall through */
+          /* no break */ deliberate_fall_through
 
         case 2:
           if( v==0 ){       /* 0x00. Next integer will be a docid. */
@@ -341,7 +341,7 @@ static int fts3auxNextMethod(sqlite3_vtab_cursor *pCursor){
         /* State 3. The integer just read is a column number. */
         default: assert( eState==3 );
           iCol = (int)v;
-          if( iCol<1 ){
+          if( iCol<1 || iCol>(pFts3->nColumn+1) ){
             rc = SQLITE_CORRUPT_VTAB;
             break;
           }

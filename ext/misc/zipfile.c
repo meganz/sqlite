@@ -456,7 +456,7 @@ static int zipfileDisconnect(sqlite3_vtab *pVtab){
 static int zipfileOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCsr){
   ZipfileTab *pTab = (ZipfileTab*)p;
   ZipfileCsr *pCsr;
-  pCsr = sqlite3_malloc(sizeof(*pCsr));
+  pCsr = sqlite3_malloc64(sizeof(*pCsr));
   *ppCsr = (sqlite3_vtab_cursor*)pCsr;
   if( pCsr==0 ){
     return SQLITE_NOMEM;
@@ -488,6 +488,7 @@ static void zipfileResetCursor(ZipfileCsr *pCsr){
     pNext = p->pNext;
     zipfileEntryFree(p);
   }
+  pCsr->pFreeEntry = 0;
 }
 
 /*
@@ -890,7 +891,13 @@ static int zipfileGetEntry(
 
     if( rc==SQLITE_OK ){
       u32 *pt = &pNew->mUnixTime;
-      pNew->cds.zFile = sqlite3_mprintf("%.*s", nFile, aRead); 
+      /* aRead[0..nFile-1] might contain embedded \000 characters
+      ** See Bug 2026-05-31T11:43:05Z */
+      pNew->cds.zFile = sqlite3_malloc64(nFile+1);
+      if( pNew->cds.zFile!=0 ){
+        memcpy(pNew->cds.zFile, aRead, nFile);
+        pNew->cds.zFile[nFile] = 0;
+      }
       pNew->aExtra = (u8*)&pNew[1];
       memcpy(pNew->aExtra, &aRead[nFile], nExtra);
       if( pNew->cds.zFile==0 ){
@@ -995,7 +1002,7 @@ static void zipfileInflate(
   int nIn,                        /* Size of buffer aIn[] in bytes */
   int nOut                        /* Expected output size */
 ){
-  u8 *aRes = sqlite3_malloc(nOut);
+  u8 *aRes = sqlite3_malloc64(nOut);
   if( aRes==0 ){
     sqlite3_result_error_nomem(pCtx);
   }else{
@@ -1392,7 +1399,7 @@ static int zipfileBestIndex(
 
 static ZipfileEntry *zipfileNewEntry(const char *zPath){
   ZipfileEntry *pNew;
-  pNew = sqlite3_malloc(sizeof(ZipfileEntry));
+  pNew = sqlite3_malloc64(sizeof(ZipfileEntry));
   if( pNew ){
     memset(pNew, 0, sizeof(ZipfileEntry));
     pNew->cds.zFile = sqlite3_mprintf("%s", zPath);
@@ -1994,10 +2001,10 @@ struct ZipfileCtx {
 };
 
 static int zipfileBufferGrow(ZipfileBuffer *pBuf, i64 nByte){
-  if( pBuf->n+nByte>pBuf->nAlloc ){
+  if( (pBuf->nAlloc-pBuf->n)<nByte ){
     u8 *aNew;
-    sqlite3_int64 nNew = pBuf->n ? pBuf->n*2 : 512;
-    int nReq = pBuf->n + nByte;
+    i64 nNew = pBuf->n ? (i64)pBuf->n*2 : 512;
+    i64 nReq = pBuf->n + nByte;
 
     while( nNew<nReq ) nNew = nNew*2;
     aNew = sqlite3_realloc64(pBuf->a, nNew);

@@ -679,4 +679,4 @@ sqlite3.initWorker1API = function(extMsgHandler){
 });
 //#else
 /* Built with the omit-oo1 flag. */
-//#endif if not omit-oo1
+//#/if if not omit-oo1
