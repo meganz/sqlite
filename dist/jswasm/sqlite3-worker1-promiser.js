@@ -100,7 +100,7 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
     const proxy = Object.create(null);
     proxy.message = msg;
     let rowCallbackId ;
-    const xfer = [];
+    let xfer = [];
     if('exec'===msg.type && msg.args){
       if('function'===typeof msg.args.callback){
         rowCallbackId = msg.messageId+':row';
@@ -111,12 +111,11 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
         toss("exec callback may not be a string when using the Promise interface.");
         
       }
-      if(msg.xfer){
-        xfer = msg.xfer;
-        delete msg.xfer;
-      }
     }
-    
+    if (msg.xfer) {
+      xfer = msg.xfer;
+      delete msg.xfer;
+    }
     let p = new Promise(function(resolve, reject){
       proxy.resolve = resolve;
       proxy.reject = reject;
