@@ -116,6 +116,7 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
       xfer = msg.xfer;
       delete msg.xfer;
     }
+    
     let p = new Promise(function(resolve, reject){
       proxy.resolve = resolve;
       proxy.reject = reject;
@@ -130,24 +131,8 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
 
 globalThis.sqlite3Worker1Promiser.defaultConfig = {
   worker: function(){
-    let theJs = "sqlite3-worker1.js";
-    if(this.currentScript){
-      const src = this.currentScript.src.split('/');
-      src.pop();
-      theJs = src.join('/')+'/' + theJs;
-      
-    }else if(globalThis.location){
-      
-      const urlParams = new URL(globalThis.location.href).searchParams;
-      if(urlParams.has('sqlite3.dir')){
-        theJs = urlParams.get('sqlite3.dir') + '/' + theJs;
-      }
-    }
-    return new Worker(theJs + globalThis.location.search);
+    return new Worker("sqlite3-worker1.js");
   }
-  .bind({
-    currentScript: globalThis?.document?.currentScript
-  })
   ,
   onerror: (...args)=>console.error('sqlite3Worker1Promiser():',...args)
 };

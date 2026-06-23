@@ -216,7 +216,7 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
     const proxy = Object.create(null);
     proxy.message = msg;
     let rowCallbackId /* message handler ID for exec on-row callback proxy */;
-    const xfer = [];
+    let xfer = [];
     if('exec'===msg.type && msg.args){
       if('function'===typeof msg.args.callback){
         rowCallbackId = msg.messageId+':row';
@@ -240,10 +240,10 @@ globalThis.sqlite3Worker1Promiser = function callee(config = callee.defaultConfi
            needed for the over-the-Worker interface).
         */
       }
-      if(msg.xfer){
-        xfer = msg.xfer;
-        delete msg.xfer;
-      }
+    }
+    if (msg.xfer) {
+      xfer = msg.xfer;
+      delete msg.xfer;
     }
     //debug("requestWork", msg);
     let p = new Promise(function(resolve, reject){
@@ -269,26 +269,10 @@ globalThis.sqlite3Worker1Promiser.defaultConfig = {
       type: 'module'
     });
 //#else
-    let theJs = "sqlite3-worker1.js";
-    if(this.currentScript){
-      const src = this.currentScript.src.split('/');
-      src.pop();
-      theJs = src.join('/')+'/' + theJs;
-      //sqlite3.config.warn("promiser currentScript, theJs =",this.currentScript,theJs);
-    }else if(globalThis.location){
-      //sqlite3.config.warn("promiser globalThis.location =",globalThis.location);
-      const urlParams = new URL(globalThis.location.href).searchParams;
-      if(urlParams.has('sqlite3.dir')){
-        theJs = urlParams.get('sqlite3.dir') + '/' + theJs;
-      }
-    }
-    return new Worker(theJs + globalThis.location.search);
+    return new Worker("sqlite3-worker1.js");
 //#/if
   }
 //#if not target:es6-module
-  .bind({
-    currentScript: globalThis?.document?.currentScript
-  })
 //#/if
   ,
   onerror: (...args)=>console.error('sqlite3Worker1Promiser():',...args)

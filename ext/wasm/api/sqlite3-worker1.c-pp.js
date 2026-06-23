@@ -26,11 +26,6 @@
   Worker-specific API needs to pass _this_ file (or equivalent) to the
   Worker constructor and then listen for an event in the form shown
   above in order to know when the module has completed initialization.
-
-  This file accepts a URL arguments to adjust how it loads sqlite3.js:
-
-  - `sqlite3.dir`, if set, treats the given directory name as the
-    directory from which `sqlite3.js` will be loaded.
 */
 //#if target:es6-bundler-friendly
 import sqlite3InitModule from './sqlite3-bundler-friendly.mjs';
@@ -38,35 +33,17 @@ import sqlite3InitModule from './sqlite3-bundler-friendly.mjs';
 import sqlite3InitModule from './sqlite3.mjs';
 //#else
 "use strict";
-{
-  const urlParams = globalThis.location
-        ? new URL(globalThis.location.href).searchParams
-        : new URLSearchParams();
-  let theJs = 'sqlite3.js';
-  if(urlParams.has('sqlite3.dir')){
-    theJs = urlParams.get('sqlite3.dir') + '/' + theJs;
-  }
-  //console.warn("worker1 theJs =",theJs);
-  importScripts(theJs);
-}
+importScripts('sqlite3.js');
 //#/if
 sqlite3InitModule().then(sqlite3 => {
-  const _installOpfsPool = async () => {
-
-    try {
-      return await sqlite3.installOpfsSAHPoolVfs({
-        vfsName: 'opfs-sahpool',
-        initialCapacity: 6,
-        clearOnInit: false,
-        directory: 'sqlite-sahpool-dir'
-      });
-    }
-    catch (ex) {
-      postMessage({type: 'worker-init-failed', error: ex.message});
-    }
-  };
-
-  _installOpfsPool().then(poolutil => {
+  sqlite3.installOpfsSAHPoolVfs({
+    vfsName: 'opfs-sahpool',
+    initialCapacity: 6,
+    clearOnInit: false,
+    directory: 'sqlite-sahpool-dir'
+  }).catch(ex => {
+    postMessage({type: 'worker-init-failed', error: ex.message});
+  }).then(poolutil => {
 
     postMessage({type: 'worker-init-success'});
 

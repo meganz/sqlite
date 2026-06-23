@@ -43,9 +43,7 @@ const toExportForESM =
     moduleScript: globalThis?.document?.currentScript,
     isWorker: ('undefined' !== typeof WorkerGlobalScope),
     location: globalThis.location,
-    urlParams:  globalThis?.location?.href
-      ? new URL(globalThis.location.href).searchParams
-      : new URLSearchParams(),
+    urlParams: new URLSearchParams(),
     /*
       It is literally impossible to reliably get the name of _this_ script
       at runtime, so impossible to reliably derive X.wasm from script name
