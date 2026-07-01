@@ -269,7 +269,7 @@ globalThis.sqlite3Worker1Promiser.defaultConfig = {
       type: 'module'
     });
 //#else
-    return new Worker("sqlite3-worker1.js");
+    return new Worker(`${self.is_extension || self.is_karma ? '' : '/'}sqlite3-worker1.js?v=1`);
 //#/if
   }
 //#if not target:es6-module
