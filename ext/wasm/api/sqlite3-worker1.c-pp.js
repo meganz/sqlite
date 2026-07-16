@@ -41,8 +41,6 @@ sqlite3InitModule().then(sqlite3 => {
     initialCapacity: 6,
     clearOnInit: false,
     directory: 'sqlite-sahpool-dir'
-  }).catch(ex => {
-    postMessage({type: 'worker-init-failed', error: ex.message});
   }).then(poolutil => {
 
     postMessage({type: 'worker-init-success'});
@@ -348,8 +346,10 @@ sqlite3InitModule().then(sqlite3 => {
         };
         return ext;
       });
-  });
-});
+  })).catch(ex => {
+    postMessage({type: 'worker-init-failed', error: ex && ex.message || String(ex)});
+  }
+);
 //#else
 /* Built with the omit-oo1 flag. */
 //#/if if not omit-oo1
